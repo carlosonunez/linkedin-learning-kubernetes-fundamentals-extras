@@ -9,7 +9,7 @@
 # To learn more about Terraform, visit https://terraform.io.
 REBUILD="${REBUILD:-false}"
 REINSTALL_AWS_LBIC="${REINSTALL_AWS_LBIC:-false}"
-TERRAFORM_DOCKER_IMAGE="terraform-awscli:latest"
+TERRAFORM_DOCKER_IMAGE="hashicorp/terraform:1.4.1"
 AWS_DOCKER_IMAGE="amazon/aws-cli:2.2.9"
 EKSCTL_DOCKER_IMAGE="weaveworks/eksctl:0.60.0"
 HELM_DOCKER_IMAGE="alpine/k8s:1.21.2"
@@ -17,13 +17,16 @@ AWS_LBIC_VERSION="2.2.0"
 AWS_LBIC_POLICY_URL="https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v$AWS_LBIC_VERSION/docs/install/iam_policy.json"
 
 terraform() {
+  docker volume ls | grep -q "tfdata" || docker volume create tfdata
   docker run --rm -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
     -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
     -e "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-""}" \
     -e "AWS_REGION=$AWS_REGION" \
     -e "TF_IN_AUTOMATION=true" \
+    -e "TF_DATA_DIR=/tfdata" \
     -v "$HOME/.kube:/root/.kube" \
-    -v "$PWD:/work" -w /work "$TERRAFORM_DOCKER_IMAGE" "$@"
+    -v "$PWD/infra:/work" \
+    -v "tfdata:/tfdata" -w /work "$TERRAFORM_DOCKER_IMAGE" "$@"
 }
 
 aws() {
