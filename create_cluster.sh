@@ -9,7 +9,7 @@
 # To learn more about Terraform, visit https://terraform.io.
 REBUILD="${REBUILD:-false}"
 REINSTALL_AWS_LBIC="${REINSTALL_AWS_LBIC:-false}"
-TERRAFORM_DOCKER_IMAGE="hashicorp/terraform:1.4.1"
+TERRAFORM_DOCKER_IMAGE="carlosnunez/terraform:1.4.1"
 AWS_DOCKER_IMAGE="amazon/aws-cli:2.2.9"
 EKSCTL_DOCKER_IMAGE="weaveworks/eksctl:0.60.0"
 HELM_DOCKER_IMAGE="alpine/k8s:1.21.2"
@@ -25,7 +25,7 @@ terraform() {
     -e "TF_IN_AUTOMATION=true" \
     -e "TF_DATA_DIR=/tfdata" \
     -v "$HOME/.kube:/root/.kube" \
-    -v "$PWD/infra:/work" \
+    -v "$(dirname "$0")/infra:/work" \
     -v "tfdata:/tfdata" -w /work "$TERRAFORM_DOCKER_IMAGE" "$@"
 }
 
@@ -34,7 +34,7 @@ aws() {
     -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
     -e "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-""}" \
     -e "AWS_REGION=$AWS_REGION" \
-    -v "$PWD:/work" \
+    -v "$(dirname "$0"):/work" \
     -v "$HOME/.kube/config:/root/.kube/config" \
     -v "/tmp:/tmp" \
     -w /work \
@@ -46,7 +46,7 @@ eksctl() {
     -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
     -e "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-""}" \
     -e "AWS_REGION=$AWS_REGION" \
-    -v "$PWD:/work" \
+    -v "$(dirname "$0"):/work" \
     -v "$HOME/.kube/config:/root/.kube/config" \
     -v "/tmp:/tmp" \
     -w /work \
@@ -60,7 +60,7 @@ helm() {
     -e "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-""}" \
     -e "AWS_REGION=$AWS_REGION" \
     -e "TF_IN_AUTOMATION=true" \
-    -v "$PWD:/work" \
+    -v "$(dirname "$0"):/work" \
     -v "$HOME/.kube:/root/.kube" \
     -v "$HOME/.helm:/root/.helm" \
     -v "$HOME/.config/helm:/root/.config/helm" \
@@ -75,7 +75,7 @@ kubectl() {
     -e "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-""}" \
     -e "AWS_REGION=$AWS_REGION" \
     -e "TF_IN_AUTOMATION=true" \
-    -v "$PWD:/work" \
+    -v "$(dirname "$0"):/work" \
     -v "$HOME/.kube:/root/.kube" \
     -v "$HOME/.helm:/root/.helm" \
     -v "$HOME/.config/helm:/root/.config/helm" \
@@ -93,8 +93,6 @@ state_bucket_exists() {
 }
 
 initialize_terraform() {
-  docker build -f "$(dirname "$0")/terraform.Dockerfile" -t "$TERRAFORM_DOCKER_IMAGE" . && \
-  &>/dev/null pushd "$INFRA_PATH"
   terraform init \
     -backend-config="bucket=$TERRAFORM_S3_BUCKET" \
     -backend-config="key=$TERRAFORM_S3_KEY"
@@ -202,14 +200,11 @@ install_vpc_cni() {
   fi
 }
 
-cleanup() {
-  test "$PWD" == "$INFRA_PATH" && &>/dev/null popd
+create_kubeconfig_file_if_needed() {
+  test -f "$HOME/.kube/config" || mkdir -p "$HOME/.kube"; touch "$HOME/.kube/config"
 }
 
 set -euo pipefail
-trap 'cleanup' SIGINT SIGHUP EXIT
-
-INFRA_PATH="$(dirname "$0")/infra"
 TERRAFORM_S3_BUCKET="${TERRAFORM_S3_BUCKET?Please provide an S3 bucket to store state into.}"
 TERRAFORM_S3_KEY="${TERRAFORM_S3_KEY?Please provide the key to use for state}"
 
@@ -223,7 +218,9 @@ else
     >&2 echo "ERROR: S3 bucket does not exist: $TERRAFORM_S3_BUCKET/$TERRAFORM_S3_KEY"
     exit 1
   fi
-  initialize_terraform && create_cluster && set_eks_context && install_aws_spot_termination_handler
+  create_kubeconfig_file_if_needed
+  { initialize_terraform && create_cluster; } || exit 1
+  set_eks_context && install_aws_spot_termination_handler
 fi
 
 if aws_lbic_installed

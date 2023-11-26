@@ -7,7 +7,7 @@
 # no additional support.
 #
 # To learn more about Terraform, visit https://terraform.io.
-TERRAFORM_DOCKER_IMAGE="terraform-awscli:latest"
+TERRAFORM_DOCKER_IMAGE="carlosnunez/terraform:1.4.1"
 AWS_DOCKER_IMAGE="amazon/aws-cli:2.2.9"
 export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
 export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
@@ -21,12 +21,16 @@ then
 fi
 
 terraform() {
+  docker volume ls | grep -q "tfdata" || docker volume create tfdata
   docker run --rm -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
     -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
-    -e "AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN" \
+    -e "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-""}" \
     -e "AWS_REGION=$AWS_REGION" \
     -e "TF_IN_AUTOMATION=true" \
-    -v "$PWD:/work" -w /work "$TERRAFORM_DOCKER_IMAGE" "$@"
+    -e "TF_DATA_DIR=/tfdata" \
+    -v "$HOME/.kube:/root/.kube" \
+    -v "$(dirname "$0")/infra:/work" \
+    -v "tfdata:/tfdata" -w /work "$TERRAFORM_DOCKER_IMAGE" "$@"
 }
 
 aws() {
@@ -34,7 +38,7 @@ aws() {
     -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
     -e "AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN" \
     -e "AWS_REGION=$AWS_REGION" \
-    -v "$PWD:/work" \
+    -v "$(dirname "$0"):/work" \
     -w /work \
     "$AWS_DOCKER_IMAGE" "$@"
 }
@@ -44,8 +48,6 @@ state_bucket_exists() {
 }
 
 initialize_terraform() {
-  docker build -f "$(dirname "$0")/terraform.Dockerfile" -t "$TERRAFORM_DOCKER_IMAGE" . && \
-  &>/dev/null pushd "$INFRA_PATH"
   terraform init \
     -backend-config="bucket=$TERRAFORM_S3_BUCKET" \
     -backend-config="key=$TERRAFORM_S3_KEY"
@@ -61,14 +63,8 @@ delete_cluster() {
   terraform destroy -auto-approve
 }
 
-cleanup() {
-  test "$PWD" == "$INFRA_PATH" && &>/dev/null popd
-}
-
 set -euo pipefail
-trap 'cleanup' SIGINT SIGHUP EXIT
 
-INFRA_PATH="$(dirname "$0")/infra"
 TERRAFORM_S3_BUCKET="${TERRAFORM_S3_BUCKET?Please provide an S3 bucket to store state into.}"
 TERRAFORM_S3_KEY="${TERRAFORM_S3_KEY?Please provide the key to use for state}"
 
