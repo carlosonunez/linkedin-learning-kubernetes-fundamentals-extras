@@ -69,7 +69,7 @@ module "explore-california-vpc" {
 module "explore-california-cluster" {
   source          = "./module"
   cluster_name    = "explore-california-cluster"
-  cluster_version = "1.20"
+  cluster_version = "1.25"
   subnets          = module.explore-california-vpc.public_subnets
   vpc_id          = module.explore-california-vpc.vpc_id
   worker_groups = [
